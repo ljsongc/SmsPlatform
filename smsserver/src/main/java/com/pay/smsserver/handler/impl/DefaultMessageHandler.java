@@ -22,6 +22,7 @@ import com.pay.smsserver.util.CommonUtil;
 
 public class DefaultMessageHandler implements MessageHandler {
 
+
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private ChannelService channelService;
 	private SmsFailureService smsFailureService;
