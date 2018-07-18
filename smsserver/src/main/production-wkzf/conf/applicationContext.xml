@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:p="http://www.springframework.org/schema/p"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans
+		http://www.springframework.org/schema/beans/spring-beans-3.1.xsd
+		http://www.springframework.org/schema/tx
+		http://www.springframework.org/schema/tx/spring-tx-3.1.xsd
+		http://www.springframework.org/schema/context
+		http://www.springframework.org/schema/context/spring-context-3.1.xsd"
+	xmlns:tx="http://www.springframework.org/schema/tx"
+	xmlns:context="http://www.springframework.org/schema/context"
+	default-autowire="byName">
+
+	<!-- 属性配置文件 -->
+	<bean id="configProperties" class="org.springframework.beans.factory.config.PropertiesFactoryBean">
+        <property name="locations">
+			<list>
+				<value>classpath:/system.properties</value>
+			</list>
+		</property>
+    </bean>
+
+    <bean id="propertyConfigurer" class="org.springframework.beans.factory.config.PreferencesPlaceholderConfigurer">
+        <property name="properties" ref="configProperties" />
+    </bean>
+
+    <!-- 配置数据源 -->
+	<bean id="dataSource" class="com.pay.dsmclient.v2.c3p0.C3p0PooledDataSource" destroy-method="close">
+       <property name="dataSourceName">
+              <value>${com.pay.smsserver.datasource.name}</value>
+       </property>
+	</bean>
+
+	<bean id="txManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource"></property>
+	</bean>
+	<tx:annotation-driven transaction-manager="txManager" />
+
+	<bean id="sessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+  		<property name="dataSource" ref="dataSource" />
+	</bean>
+
+	<!-- 配置mabatis的Mapper目录，自动创建Mapper对象 -->
+	<bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+		<property name="sqlSessionFactoryBeanName" value="sessionFactory" />
+  		<property name="basePackage" value="com.pay.smsserver.mapper" />
+	</bean>
+
+	<!-- redis管理类 -->
+	<bean id="redisManager" class="com.pay.smsserver.redis.RedisManager"></bean>
+
+	<!-- 短信发送控制器 -->
+	<bean id="messageHandler" class="com.pay.smsserver.handler.impl.DefaultMessageHandler">
+		<property name="channelService" ref="channelService"></property>
+		<property name="smsFailureService" ref="smsFailureService"></property>
+		<property name="redisManager" ref="redisManager"></property>
+	</bean>
+
+    <!-- 配置监听程序 -->
+	<bean id="commandCallBack" class="com.pay.smsserver.mina.command.CommandCallBackImpl" init-method="init">
+		<property name="messageHandler" ref="messageHandler"></property>
+		<property name="validationService" ref="validationService"></property>
+		<property name="poolSize"><value>${com.pay.smsplatform.smsserver.poolSize}</value></property>
+	</bean>
+
+    <!-- 配置服务端 -->
+	<bean id="messageServer" class="com.pay.smsserver.server.MessageServer" init-method="init" depends-on="commandCallBack">
+		<property name="port"><value>${server.port}</value></property>
+		<property name="commandCallBack">
+			<ref bean="commandCallBack"></ref>
+		</property>
+	</bean>
+
+	<!-- 上行短信发送到RocketMQ -->
+	<bean id="astrotrainProducer" class="com.pay.smsserver.astrotrain.AstrotrainProducer" init-method="start" destroy-method="shutdown">
+		<property name="topic"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.topic}</value></property>
+		<property name="appId"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.appId}</value></property>
+		<property name="groupName"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.groupName}</value></property>
+		<property name="instanceName"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.instanceName}</value></property>
+		<property name="namesrvAddr"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.namesrvAddr}</value></property>
+	</bean>
+	<bean id="camelAstrotrainProducer" class="com.pay.smsserver.astrotrain.CamelAstrotrainProducer" init-method="start" destroy-method="shutdown">
+		<property name="topic"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.camel.topic}</value></property>
+		<property name="appId"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.camel.appId}</value></property>
+		<property name="groupName"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.camel.groupName}</value></property>
+		<property name="instanceName"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.camel.instanceName}</value></property>
+		<property name="namesrvAddr"><value>${com.pay.smsplatform.smsserver.astrotrain.producer.camel.namesrvAddr}</value></property>
+	</bean>
+	<!-- 配置Service -->
+	<bean id="httpService" class="com.pay.smsserver.service.impl.HttpSericeImpl"></bean>
+	<bean id="smsConfigService" class="com.pay.smsserver.service.impl.SmsConfigServiceImpl"></bean>
+    <bean id="smsFailureService" class="com.pay.smsserver.service.impl.SmsFailureServiceImpl">
+    	<property name="channelMapper" ref="channelMapper"></property>
+    </bean>
+	<bean id="channelService" class="com.pay.smsserver.service.impl.ChannelServiceImpl">
+		<property name="masterTotal"><value>${com.pay.smsplatform.smsserver.distribute.masterTotal}</value></property>
+		<property name="spareTotal"><value>${com.pay.smsplatform.smsserver.distribute.spareTotal}</value></property>
+		<property name="failCount"><value>${com.pay.smsplatform.smsserver.failCount}</value></property>
+		<property name="expandCodeLength"><value>${com.pay.smsplatform.smsserver.expandCodeLength}</value></property>
+		<property name="redisManager" ref="redisManager"></property>
+		<property name="channelMapper" ref="channelMapper"></property>
+		<property name="tokenMapper" ref="tokenMapper"></property>
+		<property name="messageChannelContext" ref="messageChannelContext"></property>
+		<property name="producer" ref="camelAstrotrainProducer"></property>
+	</bean>
+	<bean id="validationService" class="com.pay.smsserver.service.impl.ValidationServiceImpl">
+		<property name="redisManager" ref="redisManager"></property>
+		<property name="tokenMapper" ref="tokenMapper"></property>
+	</bean>
+
+	<bean id="channelCheckStatusServiceImpl" class="com.pay.smsserver.service.impl.ChannelCheckStatusServiceImpl"></bean>
+
+    <!-- 大汉三通联刷科技通知类短信通道 -->
+	<bean id="daHanLianShuaSmsChannelImpl" class="com.pay.smsserver.channel.impl.DHMessageChannelImpl">
+		<property name="url"><value>${com.pay.smsplatform.smsserver.dahansantong.sendUrl}</value></property>
+		<property name="account"><value>${com.pay.smsplatform.smsserver.dahansantong.lianshua.account}</value></property>
+		<property name="password"><value>${com.pay.smsplatform.smsserver.dahansantong.lianshua.password}</value></property>
+		<property name="signature"><value>${com.pay.smsplatform.smsserver.dahansantong.lianshua.signature}</value></property>
+		<property name="connectionTimeOut"><value>${com.pay.smsplatform.smsserver.dahansantong.connectiontimeout}</value></property>
+		<property name="socketTimeout"><value>${com.pay.smsplatform.smsserver.dahansantong.sockettimeout}</value></property>
+		<property name="requestCharset"><value>${com.pay.smsplatform.smsserver.dahansantong.requestCharset}</value></property>
+		<property name="responseCharset"><value>${com.pay.smsplatform.smsserver.dahansantong.responseCharset}</value></property>
+		<property name="proxyIp"><value>${com.pay.smsplatform.smsserver.dahansantong.proxyIp}</value></property>
+		<property name="proxyPort"><value>${com.pay.smsplatform.smsserver.dahansantong.proxyPort}</value></property>
+		<property name="singleMaxNum"><value>${com.pay.smsplatform.smsserver.dahansantong.singleMaxNum}</value></property>
+		<property name="multiMaxNum"><value>${com.pay.smsplatform.smsserver.dahansantong.multiMaxNum}</value></property>
+		<property name="submitNumber"><value>${com.pay.smsplatform.smsserver.dahansantong.submitNumber}</value></property>
+    	<property name="upLinkUrl"><value>${com.pay.smsplatform.smsserver.dahansantong.uplink.sendUrl}</value></property>
+    	<property name="statusUrl"><value>${com.pay.smsplatform.smsserver.dahansantong.status.sendUrl}</value></property>
+		<property name="channelService" ref="channelService"></property>
+		<property name="httpService" ref="httpService"></property>
+		<property name="astrotrainProducer" ref="astrotrainProducer"></property>
+	</bean>
+
+	<!-- 大汉三通卡友信息通知类短信通道 -->
+	<bean id="daHanXinXiSmsChannelImpl" class="com.pay.smsserver.channel.impl.DHMessageChannelImpl">
+		<property name="url"><value>${com.pay.smsplatform.smsserver.dahansantong.sendUrl}</value></property>
+		<property name="account"><value>${com.pay.smsplatform.smsserver.dahansantong.xinxi.account}</value></property>
+		<property name="password"><value>${com.pay.smsplatform.smsserver.dahansantong.xinxi.password}</value></property>
+		<property name="signature"><value>${com.pay.smsplatform.smsserver.dahansantong.xinxi.signature}</value></property>
+		<property name="connectionTimeOut"><value>${com.pay.smsplatform.smsserver.dahansantong.connectiontimeout}</value></property>
+		<property name="socketTimeout"><value>${com.pay.smsplatform.smsserver.dahansantong.sockettimeout}</value></property>
+		<property name="requestCharset"><value>${com.pay.smsplatform.smsserver.dahansantong.requestCharset}</value></property>
+		<property name="responseCharset"><value>${com.pay.smsplatform.smsserver.dahansantong.responseCharset}</value></property>
+		<property name="proxyIp"><value>${com.pay.smsplatform.smsserver.dahansantong.proxyIp}</value></property>
+		<property name="proxyPort"><value>${com.pay.smsplatform.smsserver.dahansantong.proxyPort}</value></property>
+		<property name="singleMaxNum"><value>${com.pay.smsplatform.smsserver.dahansantong.singleMaxNum}</value></property>
+		<property name="multiMaxNum"><value>${com.pay.smsplatform.smsserver.dahansantong.multiMaxNum}</value></property>
+		<property name="submitNumber"><value>${com.pay.smsplatform.smsserver.dahansantong.submitNumber}</value></property>
+    	<property name="upLinkUrl"><value>${com.pay.smsplatform.smsserver.dahansantong.uplink.sendUrl}</value></property>
+    	<property name="statusUrl"><value>${com.pay.smsplatform.smsserver.dahansantong.status.sendUrl}</value></property>
+		<property name="channelService" ref="channelService"></property>
+		<property name="httpService" ref="httpService"></property>
+		<property name="astrotrainProducer" ref="astrotrainProducer"></property>
+	</bean>
+
+	<!-- 大汉三通第二条联刷科技通知类短信通道 -->
+	<bean id="daHanLianShuaSecondSmsChannelImpl" class="com.pay.smsserver.channel.impl.DHMessageChannelImpl">
+		<property name="url"><value>${com.pay.smsplatform.smsserver.dahansantong.sendUrl}</value></property>
+		<property name="account"><value>${com.pay.smsplatform.smsserver.dahansantong.lianshuasecond.account}</value></property>
+		<property name="password"><value>${com.pay.smsplatform.smsserver.dahansantong.lianshuasecond.password}</value></property>
+		<property name="signature"><value>${com.pay.smsplatform.smsserver.dahansantong.lianshuasecond.signature}</value></property>
+		<property name="connectionTimeOut"><value>${com.pay.smsplatform.smsserver.dahansantong.connectiontimeout}</value></property>
+		<property name="socketTimeout"><value>${com.pay.smsplatform.smsserver.dahansantong.sockettimeout}</value></property>
+		<property name="requestCharset"><value>${com.pay.smsplatform.smsserver.dahansantong.requestCharset}</value></property>
+		<property name="responseCharset"><value>${com.pay.smsplatform.smsserver.dahansantong.responseCharset}</value></property>
+		<property name="proxyIp"><value>${com.pay.smsplatform.smsserver.dahansantong.proxyIp}</value></property>
+		<property name="proxyPort"><value>${com.pay.smsplatform.smsserver.dahansantong.proxyPort}</value></property>
+		<property name="singleMaxNum"><value>${com.pay.smsplatform.smsserver.dahansantong.singleMaxNum}</value></property>
+		<property name="multiMaxNum"><value>${com.pay.smsplatform.smsserver.dahansantong.multiMaxNum}</value></property>
+		<property name="submitNumber"><value>${com.pay.smsplatform.smsserver.dahansantong.submitNumber}</value></property>
+    	<property name="upLinkUrl"><value>${com.pay.smsplatform.smsserver.dahansantong.uplink.sendUrl}</value></property>
+    	<property name="statusUrl"><value>${com.pay.smsplatform.smsserver.dahansantong.status.sendUrl}</value></property>
+		<property name="channelService" ref="channelService"></property>
+		<property name="httpService" ref="httpService"></property>
+		<property name="astrotrainProducer" ref="astrotrainProducer"></property>
+	</bean>
+
+	<bean id="qxtMessageChannelImpl" class="com.pay.smsserver.channel.impl.QXTMessageChannelImpl"></bean>
+
+	<!-- 通道上下文 -->
+	<bean id="messageChannelContext" class="com.pay.smsserver.channel.MessageChannelContext">
+		<property name="channelMap">
+			<map>
+				<entry key="DaHanLS">
+					<ref bean="daHanLianShuaSmsChannelImpl" />
+				</entry>
+				<entry key="DaHanXX">
+					<ref bean="daHanXinXiSmsChannelImpl" />
+				</entry>
+				<entry key="DaHanLSS">
+					<ref bean="daHanLianShuaSecondSmsChannelImpl" />
+				</entry>
+			</map>
+		</property>
+	</bean>
+
+    <!-- 配置01、JobHandler -->
+		<bean id="daHanLianShuaStatusJobHandler" class="com.pay.smsserver.jobHandler.DaHanSanTongStatusJobHandler">
+			<property name="messageChannel" ref="daHanLianShuaSmsChannelImpl"></property>
+		</bean>
+		<bean id="daHanLianShuaUplinkJobHandler" class="com.pay.smsserver.jobHandler.DaHanSanTongUplinkJobHandler">
+			<property name="messageChannel" ref="daHanLianShuaSmsChannelImpl"></property>
+		</bean>
+		<bean id="daHanXinXiStatusJobHandler" class="com.pay.smsserver.jobHandler.DaHanSanTongStatusJobHandler">
+			<property name="messageChannel" ref="daHanXinXiSmsChannelImpl"></property>
+		</bean>
+		<bean id="daHanXinXiUplinkJobHandler" class="com.pay.smsserver.jobHandler.DaHanSanTongUplinkJobHandler">
+			<property name="messageChannel" ref="daHanXinXiSmsChannelImpl"></property>
+		</bean>
+		<bean id="daHanLianShuaSecondStatusJobHandler" class="com.pay.smsserver.jobHandler.DaHanSanTongStatusJobHandler">
+			<property name="messageChannel" ref="daHanLianShuaSecondSmsChannelImpl"></property>
+		</bean>
+		<bean id="daHanLianShuaSecondUplinkJobHandler" class="com.pay.smsserver.jobHandler.DaHanSanTongUplinkJobHandler">
+			<property name="messageChannel" ref="daHanLianShuaSecondSmsChannelImpl"></property>
+		</bean>
+
+		 <!-- 失败重发定时任务 -->
+	    <bean id="smsFailureJobHandler" class="com.pay.smsserver.jobHandler.SmsFailureJobHandler">
+			<property name="messageHandler" ref="messageHandler"></property>
+			<property name="retryCodes"><value>${com.pay.smsplatform.smsserver.failure.job.retryCode}</value></property>
+			<property name="total"><value>${com.pay.smsplatform.smsserver.failure.job.total}</value></property>
+			<property name="smsFailureService" ref="smsFailureService"></property>
+	    </bean>
+	    <!-- 通道状态监控任务 -->
+	    <bean id="channelCheckStatusJobHandler" class="com.pay.smsserver.jobHandler.ChannelCheckStatusJobHandler">
+			<property name="successRate"><value>${com.pay.smsplatform.smsserver.checkStatus.job.successRate}</value></property>
+			<property name="recoverInterval"><value>${com.pay.smsplatform.smsserver.checkStatus.job.recoverInterval}</value></property>
+			<property name="checkInterval"><value>${com.pay.smsplatform.smsserver.checkStatus.job.checkInterval}</value></property>
+			<property name="channelCheckStatusService" ref="channelCheckStatusServiceImpl"></property>
+			<property name="smsConfigService" ref="smsConfigService"></property>
+	    </bean>
+		<!-- 配置02、执行器 -->
+		<bean id="dspJobExecutor" class="com.pay.dsp.core.executor.DspJobExecutor" init-method="start" destroy-method="destroy" >
+			<property name="executorAppName" value="${com.pay.smsserver.appName}"/>
+			<property name="zkServerAddress" value="${com.pay.smsserver.zookeeper}"/>
+			<property name="jobHandlerRepository">
+            <bean class="java.util.concurrent.ConcurrentHashMap">
+            	<constructor-arg>
+	            	<map>
+		                <entry key="daHanLianShuaStatusJobHandler"><ref bean="daHanLianShuaStatusJobHandler"/></entry>
+		                <entry key="daHanLianShuaUplinkJobHandler"><ref bean="daHanLianShuaUplinkJobHandler"/></entry>
+		                <entry key="daHanXinXiStatusJobHandler"><ref bean="daHanXinXiStatusJobHandler"/></entry>
+		                <entry key="daHanXinXiUplinkJobHandler"><ref bean="daHanXinXiUplinkJobHandler"/></entry>
+		                <entry key="daHanLianShuaSecondStatusJobHandler"><ref bean="daHanLianShuaSecondStatusJobHandler"/></entry>
+		                <entry key="daHanLianShuaSecondUplinkJobHandler"><ref bean="daHanLianShuaSecondUplinkJobHandler"/></entry>
+		                <entry key="smsFailureJobHandler"><ref bean="smsFailureJobHandler"/></entry>
+		                <entry key="channelCheckStatusJobHandler"><ref bean="channelCheckStatusJobHandler"/></entry>
+	            	</map>
+            	</constructor-arg>
+            </bean>
+        </property>
+	</bean>
+
+</beans>
